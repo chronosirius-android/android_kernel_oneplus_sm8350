@@ -147,63 +147,67 @@ QDF_STATUS dp_txrx_deinit(ol_txrx_soc_handle soc)
 }
 
 /**
- * dp_tx_send() - Transmit a frame
- * @soc_hdl: datapath soc handle
- * @vdev_id: id of vdev
- * @nbuf: skb
+ * dp_rx_tm_get_pending() - get number of frame in thread
+ * nbuf queue pending
+ * @soc: ol_txrx_soc_handle object
  *
- * Return: status of operation
+ * Return: number of frames
  */
-static QDF_STATUS dp_tx_send(struct cdp_soc_t *soc_hdl, uint8_t vdev_id,
-			     qdf_nbuf_t nbuf)
+#ifdef FEATURE_WLAN_DP_RX_THREADS
+int dp_rx_tm_get_pending(ol_txrx_soc_handle soc)
 {
-	struct dp_soc *soc = cdp_soc_t_to_dp_soc(soc_hdl);
-	struct dp_vdev *vdev = dp_get_vdev_from_soc_vdev_id_wifi3(soc, vdev_id);
-	QDF_STATUS status;
+	int i;
+	int num_pending = 0;
+	struct dp_rx_thread *rx_thread;
+	struct dp_txrx_handle *dp_ext_hdl;
+	struct dp_rx_tm_handle *rx_tm_hdl;
 
-	if (!soc || !vdev)
-		return QDF_STATUS_E_INVAL;
+	if (!soc)
+		return 0;
 
-	if (!nbuf) {
-		dp_err("Invalid skb!");
-		return QDF_STATUS_E_RESOURCES;
+	dp_ext_hdl = cdp_soc_get_dp_txrx_handle(soc);
+	if (!dp_ext_hdl)
+		return 0;
+
+	rx_tm_hdl = &dp_ext_hdl->rx_tm_hdl;
+
+	for (i = 0; i < rx_tm_hdl->num_dp_rx_threads; i++) {
+		rx_thread = rx_tm_hdl->rx_thread[i];
+		if (!rx_thread)
+			continue;
+		num_pending += qdf_nbuf_queue_head_qlen(&rx_thread->nbuf_queue);
 	}
 
-	if (!qdf_nbuf_get_users(nbuf)) {
-		dp_err("Invalid skb users!");
-		return QDF_STATUS_E_RESOURCES;
-	}
+	if (num_pending)
+		dp_debug("pending frames in thread queue %d", num_pending);
 
-#ifdef QCA_SUPPORT_QCA6490
-	if (qdf_unlikely(vdev->is_packet_injection_enabled)) {
-		struct ieee80211_hdr *hdr;
-
-		if (qdf_unlikely(qdf_nbuf_headroom(nbuf) < sizeof(struct ieee80211_hdr))) {
-			dp_err("Insufficient headroom for injection");
-			return QDF_STATUS_E_NOMEM;
-		}
-
-		hdr = (struct ieee80211_hdr *)qdf_nbuf_push_head(nbuf, sizeof(struct ieee80211_hdr));
-		if (!hdr) {
-			dp_err("Failed to push ieee80211 header");
-			return QDF_STATUS_E_FAILURE;
-		}
-
-		/* Set frame control field for injected packet */
-		hdr->frame_control = cpu_to_le16(IEEE80211_FTYPE_DATA | IEEE80211_STYPE_DATA);
-
-		/* Set address fields */
-		qdf_mem_copy(hdr->addr1, vdev->mac_addr.raw, QDF_MAC_ADDR_SIZE);
-		qdf_mem_copy(hdr->addr2, vdev->mac_addr.raw, QDF_MAC_ADDR_SIZE);
-		qdf_mem_copy(hdr->addr3, vdev->bssid.raw, QDF_MAC_ADDR_SIZE);
-
-		return dp_tx_send_raw_frame(soc, vdev, nbuf, IEEE80211_TX_CTL_INJECT);
-	}
-#endif
-	return dp_tx_send_exception(soc, vdev, nbuf, NULL);
+	return num_pending;
 }
+#else
+int dp_rx_tm_get_pending(ol_txrx_soc_handle soc)
+{
+	return 0;
+}
+#endif
 
 #ifdef DP_MEM_PRE_ALLOC
+
+/*
+ * Packet Injection Modifications Start
+ *
+ * This section contains modifications for packet injection functionality.
+ * It is specific to QCA6490 and is conditionally compiled.
+ *
+ * Key modifications include:
+ * 1. Checking if packet injection is enabled for the vdev
+ * 2. Ensuring sufficient headroom for injected packets
+ * 3. Adding IEEE 802.11 header to the packet
+ * 4. Setting appropriate frame control fields
+ * 5. Copying MAC addresses to the correct fields
+ * 6. Using a special raw frame transmission function for injected packets
+ *
+ * These changes allow for custom packet injection, bypassing normal Wi-Fi stack processing.
+ */
 
 /* Max entries in FISA Flow table */
 #define FISA_RX_FT_SIZE 128
@@ -297,31 +301,42 @@ struct dp_prealloc_context {
 };
 
 static struct dp_prealloc_context g_dp_context_allocs[] = {
-	{DP_PDEV_TYPE, (sizeof(struct dp_pdev)), false, true, NULL},
+	{DP_PDEV_TYPE, (sizeof(struct dp_pdev)), false,  true, NULL},
 #ifdef WLAN_FEATURE_DP_RX_RING_HISTORY
 	/* 4 Rx ring history */
-	{DP_RX_RING_HIST_TYPE, sizeof(struct dp_rx_history), false, false, NULL},
-	{DP_RX_RING_HIST_TYPE, sizeof(struct dp_rx_history), false, false, NULL},
-	{DP_RX_RING_HIST_TYPE, sizeof(struct dp_rx_history), false, false, NULL},
-	{DP_RX_RING_HIST_TYPE, sizeof(struct dp_rx_history), false, false, NULL},
+	{DP_RX_RING_HIST_TYPE, sizeof(struct dp_rx_history), false, false,
+	 NULL},
+	{DP_RX_RING_HIST_TYPE, sizeof(struct dp_rx_history), false, false,
+	 NULL},
+	{DP_RX_RING_HIST_TYPE, sizeof(struct dp_rx_history), false, false,
+	 NULL},
+	{DP_RX_RING_HIST_TYPE, sizeof(struct dp_rx_history), false, false,
+	 NULL},
 	/* 1 Rx error ring history */
-	{DP_RX_ERR_RING_HIST_TYPE, sizeof(struct dp_rx_err_history), false, false, NULL},
+	{DP_RX_ERR_RING_HIST_TYPE, sizeof(struct dp_rx_err_history),
+	 false, false, NULL},
 #ifndef RX_DEFRAG_DO_NOT_REINJECT
 	/* 1 Rx reinject ring history */
-	{DP_RX_REINJECT_RING_HIST_TYPE, sizeof(struct dp_rx_reinject_history), false, false, NULL},
+	{DP_RX_REINJECT_RING_HIST_TYPE, sizeof(struct dp_rx_reinject_history),
+	 false, false, NULL},
 #endif	/* RX_DEFRAG_DO_NOT_REINJECT */
 	/* 1 Rx refill ring history */
-	{DP_RX_REFILL_RING_HIST_TYPE, sizeof(struct dp_rx_refill_history), false, false, NULL},
+	{DP_RX_REFILL_RING_HIST_TYPE, sizeof(struct dp_rx_refill_history),
+	false, false, NULL},
 #endif	/* WLAN_FEATURE_DP_RX_RING_HISTORY */
 #ifdef DP_TX_HW_DESC_HISTORY
-	{DP_TX_HW_DESC_HIST_TYPE, sizeof(struct dp_tx_hw_desc_history), false, false, NULL},
+	{DP_TX_HW_DESC_HIST_TYPE, sizeof(struct dp_tx_hw_desc_history),
+	false, false, NULL},
 #endif
 #ifdef WLAN_FEATURE_DP_TX_DESC_HISTORY
-	{DP_TX_TCL_HIST_TYPE, sizeof(struct dp_tx_tcl_history), false, false, NULL},
-	{DP_TX_COMP_HIST_TYPE, sizeof(struct dp_tx_comp_history), false, false, NULL},
+	{DP_TX_TCL_HIST_TYPE, sizeof(struct dp_tx_tcl_history),
+	 false, false, NULL},
+	{DP_TX_COMP_HIST_TYPE, sizeof(struct dp_tx_comp_history),
+	 false, false, NULL},
 #endif	/* WLAN_FEATURE_DP_TX_DESC_HISTORY */
 #ifdef WLAN_SUPPORT_RX_FISA
-	{DP_FISA_RX_FT_TYPE, sizeof(struct dp_fisa_rx_sw_ft) * FISA_RX_FT_SIZE, false, true, NULL},
+	{DP_FISA_RX_FT_TYPE, sizeof(struct dp_fisa_rx_sw_ft) * FISA_RX_FT_SIZE,
+	 false, true, NULL},
 #endif
 };
 
