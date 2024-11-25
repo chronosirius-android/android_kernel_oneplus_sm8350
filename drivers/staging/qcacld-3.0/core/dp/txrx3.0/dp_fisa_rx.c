@@ -1827,7 +1827,9 @@ static bool dp_is_nbuf_bypass_fisa(qdf_nbuf_t nbuf)
 	if (QDF_NBUF_CB_RX_TCP_PROTO(nbuf) ||
 	    qdf_nbuf_is_exc_frame(nbuf) ||
 	    qdf_nbuf_is_ipv4_dhcp_pkt(nbuf) ||
-	    qdf_nbuf_is_da_mcbc(nbuf))
+	    qdf_nbuf_is_da_mcbc(nbuf) ||
+	    QDF_NBUF_CB_RX_MONITOR_MODE(nbuf) ||
+	    QDF_NBUF_CB_RX_INJECT_PKT(nbuf))
 		return true;
 
 	return false;
@@ -2160,3 +2162,4 @@ void dp_resume_fse_cache_flush(struct dp_soc *soc)
 
 	dp_info("fse cache flush resumed");
 }
+

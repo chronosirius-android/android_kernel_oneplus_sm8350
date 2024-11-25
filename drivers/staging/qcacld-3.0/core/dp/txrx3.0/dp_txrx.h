@@ -29,9 +29,15 @@
 /**
  * struct dp_txrx_config - dp txrx configuration passed to dp txrx modules
  * @enable_dp_rx_threads: enable DP rx threads or not
+ * @enable_monitor_mode: enable monitor mode for packet injection
+ * @enable_packet_injection: enable packet injection functionality
+ * @injection_rate_limit: rate limit for packet injection (packets/sec, 0=unlimited)
  */
 struct dp_txrx_config {
 	bool enable_rx_threads;
+	bool enable_monitor_mode;
+	bool enable_packet_injection;
+	uint32_t injection_rate_limit;
 };
 
 struct dp_txrx_handle_cmn;
@@ -618,4 +624,58 @@ static inline void dp_prealloc_deinit(void) { }
 
 #endif
 
-#endif /* _DP_TXRX_H */
+/* Packet injection definitions */
+#define DP_TX_INJECTION_MAX_SIZE 2342  /* Max 802.11 frame size */
+#define DP_TX_INJECTION_RATE_DEFAULT 100 /* Default rate limit (pkts/sec) */
+
+/**
+ * enum dp_tx_injection_frame_type - Frame types for packet injection
+ * @DP_TX_FRAME_TYPE_RAW_11: Raw 802.11 frame with radiotap header
+ * @DP_TX_FRAME_TYPE_NATIVE: Native format frame
+ */
+enum dp_tx_injection_frame_type {
+	DP_TX_FRAME_TYPE_RAW_11,
+	DP_TX_FRAME_TYPE_NATIVE
+};
+
+/**
+ * struct dp_tx_injection_params - Parameters for packet injection
+ * @frame_type: Type of frame being injected (raw or native)
+ * @flags: Control flags for injection
+ * @rate_code: HW rate code for frame transmission
+ * @retry_limit: Maximum number of hw retries
+ * @power: Transmit power in dBm
+ * @channel: Channel to transmit on
+ */
+struct dp_tx_injection_params {
+	enum dp_tx_injection_frame_type frame_type;
+	uint16_t flags;
+	uint8_t rate_code;
+	uint8_t retry_limit;
+	uint8_t power;
+	uint8_t channel;
+};
+
+/**
+ * dp_tx_inject_frame() - Inject a raw frame into the tx path
+ * @soc: ol_txrx_soc_handle object
+ * @vdev_id: ID of the virtual device
+ * @nbuf: Network buffer containing frame to inject
+ * @params: Injection parameters
+ *
+ * Return: QDF_STATUS_SUCCESS on success, error qdf status on failure
+ */
+QDF_STATUS dp_tx_inject_frame(ol_txrx_soc_handle soc, uint8_t vdev_id,
+			     qdf_nbuf_t nbuf,
+			     struct dp_tx_injection_params *params);
+
+/**
+ * dp_tx_validate_injection_params() - Validate injection parameters
+ * @params: Injection parameters to validate
+ *
+ * Return: QDF_STATUS_SUCCESS if valid, error status otherwise
+ */
+QDF_STATUS dp_tx_validate_injection_params(
+		struct dp_tx_injection_params *params);
+
+#endif

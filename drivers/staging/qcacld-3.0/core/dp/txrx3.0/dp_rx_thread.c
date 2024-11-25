@@ -404,7 +404,7 @@ static int dp_rx_thread_process_nbufq(struct dp_rx_thread *rx_thread)
 	ol_osif_vdev_handle osif_vdev;
 	ol_txrx_soc_handle soc;
 	uint32_t num_list_elements = 0;
-
+	bool is_monitor_mode = false;
 	struct dp_txrx_handle_cmn *txrx_handle_cmn;
 
 	txrx_handle_cmn =
@@ -429,17 +429,31 @@ static int dp_rx_thread_process_nbufq(struct dp_rx_thread *rx_thread)
 		rx_thread->stats.nbuf_dequeued += num_list_elements;
 
 		vdev_id = QDF_NBUF_CB_RX_VDEV_ID(nbuf_list);
-		cdp_get_os_rx_handles_from_vdev(soc, vdev_id, &stack_fn,
-						&osif_vdev);
+		is_monitor_mode = QDF_NBUF_CB_RX_MONITOR_MODE(nbuf_list);
+
+		/* Handle monitor mode and raw 802.11 frames differently */
+		if (is_monitor_mode) {
+			cdp_get_mon_rx_handles_from_vdev(soc, vdev_id, &stack_fn,
+							&osif_vdev);
+		} else {
+			cdp_get_os_rx_handles_from_vdev(soc, vdev_id, &stack_fn,
+							&osif_vdev);
+		}
+
 		dp_debug("rx_thread %pK sending packet %pK to stack",
 			 rx_thread, nbuf_list);
+
 		if (!stack_fn || !osif_vdev ||
 		    QDF_STATUS_SUCCESS != stack_fn(osif_vdev, nbuf_list)) {
 			rx_thread->stats.dropped_invalid_os_rx_handles +=
 							num_list_elements;
 			qdf_nbuf_list_free(nbuf_list);
 		} else {
-			rx_thread->stats.nbuf_sent_to_stack +=
+			if (is_monitor_mode)
+				rx_thread->stats.nbuf_sent_to_stack_mon +=
+							num_list_elements;
+			else
+				rx_thread->stats.nbuf_sent_to_stack +=
 							num_list_elements;
 		}
 		nbuf_list = dp_rx_tm_thread_dequeue(rx_thread);
