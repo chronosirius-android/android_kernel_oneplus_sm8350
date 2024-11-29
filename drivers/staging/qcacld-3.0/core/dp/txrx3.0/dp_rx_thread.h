@@ -59,8 +59,6 @@ struct dp_rx_thread_stats {
 	unsigned int nbuf_queued_total;
 	unsigned int nbuf_dequeued;
 	unsigned int nbuf_sent_to_stack;
-	unsigned int nbuf_sent_to_stack_mon;
-	unsigned int nbuf_sent_to_stack_raw;
 	unsigned int gro_flushes;
 	unsigned int gro_flushes_by_vdev_del;
 	unsigned int nbufq_max_len;

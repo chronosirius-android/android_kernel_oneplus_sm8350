@@ -192,6 +192,23 @@ int dp_rx_tm_get_pending(ol_txrx_soc_handle soc)
 
 #ifdef DP_MEM_PRE_ALLOC
 
+/*
+ * Packet Injection Modifications Start
+ *
+ * This section contains modifications for packet injection functionality.
+ * It is specific to QCA6490 and is conditionally compiled.
+ *
+ * Key modifications include:
+ * 1. Checking if packet injection is enabled for the vdev
+ * 2. Ensuring sufficient headroom for injected packets
+ * 3. Adding IEEE 802.11 header to the packet
+ * 4. Setting appropriate frame control fields
+ * 5. Copying MAC addresses to the correct fields
+ * 6. Using a special raw frame transmission function for injected packets
+ *
+ * These changes allow for custom packet injection, bypassing normal Wi-Fi stack processing.
+ */
+
 /* Max entries in FISA Flow table */
 #define FISA_RX_FT_SIZE 128
 
@@ -945,80 +962,5 @@ void dp_prealloc_put_consistent_mem_unaligned(void *va_unaligned)
 
 	if (i == QDF_ARRAY_SIZE(g_dp_consistent_unaligned_allocs))
 		dp_err("unable to find vaddr %pK", va_unaligned);
-}
-
-QDF_STATUS dp_tx_validate_injection_params(struct dp_tx_injection_params *params)
-{
-	if (!params)
-		return QDF_STATUS_E_INVAL;
-
-	if (params->frame_type != DP_TX_FRAME_TYPE_RAW_11 &&
-	    params->frame_type != DP_TX_FRAME_TYPE_NATIVE)
-		return QDF_STATUS_E_INVAL;
-
-	if (params->power > 30) /* Max 30 dBm */
-		return QDF_STATUS_E_INVAL;
-
-	if (params->retry_limit > 16) /* Max HW retries */
-		return QDF_STATUS_E_INVAL;
-
-	if (params->channel > 165) /* Max valid channel */
-		return QDF_STATUS_E_INVAL;
-
-	return QDF_STATUS_SUCCESS;
-}
-
-QDF_STATUS dp_tx_inject_frame(ol_txrx_soc_handle soc, uint8_t vdev_id,
-			     qdf_nbuf_t nbuf, struct dp_tx_injection_params *params)
-{
-	struct dp_txrx_handle *dp_ext_hdl;
-	struct dp_vdev *vdev;
-	QDF_STATUS status;
-	uint32_t headroom;
-
-	if (!soc || !nbuf || !params)
-		return QDF_STATUS_E_INVAL;
-
-	status = dp_tx_validate_injection_params(params);
-	if (QDF_IS_STATUS_ERROR(status))
-		return status;
-
-	dp_ext_hdl = cdp_soc_get_dp_txrx_handle(soc);
-	if (!dp_ext_hdl)
-		return QDF_STATUS_E_FAULT;
-
-	vdev = dp_get_vdev_from_soc_vdev_id_wifi3(soc, vdev_id);
-	if (!vdev)
-		return QDF_STATUS_E_INVAL;
-
-	if (!dp_ext_hdl->config.enable_packet_injection)
-		return QDF_STATUS_E_PERM;
-
-	if (params->frame_type == DP_TX_FRAME_TYPE_RAW_11 &&
-	    !dp_ext_hdl->config.enable_monitor_mode)
-		return QDF_STATUS_E_PERM;
-
-	headroom = qdf_nbuf_headroom(nbuf);
-	if (headroom < HAL_TX_DESC_SIZE)
-		return QDF_STATUS_E_NOMEM;
-
-	/* Configure monitor mode if needed */
-	if (params->frame_type == DP_TX_FRAME_TYPE_RAW_11) {
-		status = dp_monitor_mode_ring_config(soc, vdev_id, true);
-		if (QDF_IS_STATUS_ERROR(status))
-			return status;
-	}
-
-	/* Set TX flags based on injection parameters */
-	if (params->flags & DP_TX_INJECT_FLAG_NO_ACK)
-		qdf_nbuf_set_tx_noack(nbuf);
-
-	/* Set rate code and power in TX descriptor */
-	hal_tx_desc_set_rate(nbuf, params->rate_code);
-	hal_tx_desc_set_power(nbuf, params->power);
-	hal_tx_desc_set_channel(nbuf, params->channel);
-
-	/* Inject frame into normal TX path */
-	return dp_tx_send(soc, vdev_id, nbuf);
 }
 #endif
