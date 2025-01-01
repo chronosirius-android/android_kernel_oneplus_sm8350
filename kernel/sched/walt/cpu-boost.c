@@ -210,6 +210,9 @@ static void do_input_boost(struct work_struct *work)
 	unsigned int i, ret;
 	struct cpu_sync *i_sync_info;
 
+	if (!input_boost_ms)
+		return;
+
 	cancel_delayed_work_sync(&input_boost_rem);
 	if (sched_boost_active) {
 		sched_set_boost(0);
@@ -248,7 +251,7 @@ static void cpuboost_input_event(struct input_handle *handle,
 		return;
 
 	now = ktime_to_us(ktime_get());
-	if (now - last_input_time < MIN_INPUT_INTERVAL)
+	if ((now - last_input_time) < (input_boost_ms * USEC_PER_MSEC))
 		return;
 
 	if (work_pending(&input_boost_work))
